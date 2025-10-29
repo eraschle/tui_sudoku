@@ -1,0 +1,77 @@
+/* Main Textual CSS for Sudoku Application */
+
+/* Global styles */
+Screen {
+    background: $background;
+}
+
+/* Header and Footer */
+Header {
+    background: $primary;
+    color: $text;
+}
+
+Footer {
+    background: $panel;
+}
+
+/* Container styles */
+Container {
+    background: $surface;
+}
+
+/* Button styles */
+Button {
+    min-width: 16;
+    height: 3;
+}
+
+Button:hover {
+    background: $primary-darken-1;
+}
+
+Button:focus {
+    text-style: bold;
+}
+
+Button.-primary {
+    background: $primary;
+    color: $text;
+}
+
+Button.-error {
+    background: $error;
+    color: $text;
+}
+
+/* Input styles */
+Input {
+    border: tall $primary;
+}
+
+Input:focus {
+    border: tall $accent;
+}
+
+/* Static text styles */
+Static {
+    color: $text;
+}
+
+/* RadioButton styles */
+RadioButton {
+    margin: 0 2;
+}
+
+RadioButton:focus {
+    background: $primary-darken-3;
+}
+
+/* Label styles */
+Label {
+    color: $text;
+    text-style: bold;
+}
+
+/* Theme colors - can be customized */
+/* These use Textual's color system and can be overridden */

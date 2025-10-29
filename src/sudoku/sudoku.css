@@ -1,0 +1,67 @@
+/* Sudoku TUI CSS Stylesheet */
+
+/* Screen and container styling */
+Screen {
+    align: center middle;
+}
+
+Container {
+    width: 100%;
+    height: 100%;
+    align: center middle;
+}
+
+/* Welcome screen styling */
+#welcome {
+    width: 80;
+    height: auto;
+    content-align: center middle;
+    text-align: center;
+    padding: 2;
+    border: heavy $primary;
+}
+
+/* Header and Footer */
+Header {
+    dock: top;
+}
+
+Footer {
+    dock: bottom;
+}
+
+/* Future board styling */
+.board {
+    width: auto;
+    height: auto;
+    border: heavy $accent;
+    padding: 1;
+}
+
+.cell {
+    width: 3;
+    height: 1;
+    content-align: center middle;
+    text-align: center;
+}
+
+.cell-given {
+    color: $text;
+    text-style: bold;
+}
+
+.cell-user {
+    color: $success;
+}
+
+.cell-selected {
+    background: $primary-background;
+}
+
+.cell-error {
+    color: $error;
+}
+
+.cell-hint {
+    color: $warning;
+}
