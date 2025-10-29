@@ -6,6 +6,7 @@ the Sudoku board, make moves, and complete puzzles.
 
 from collections.abc import Callable
 from datetime import timedelta
+from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
@@ -42,36 +43,47 @@ class GameScreen(Screen):
         on_quit: Callback for quit request.
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
         ("n", "new_game", "New Game"),
         ("s", "show_statistics", "Statistics"),
         ("escape", "back_to_menu", "Menu"),
         ("p", "pause", "Pause"),
+        ("v", "toggle_validation", "Validation"),
+        ("t", "adjust_transparency", "Transparency"),
     ]
 
-    CSS = """
+    CSS: ClassVar[str] = """
     GameScreen {
         align: center middle;
     }
 
     #game-container {
-        width: auto;
-        height: auto;
-        border: thick $primary;
+        width: 100%;
+        height: 100%;
+        border: none;
         background: $surface;
     }
 
     #board-container {
         align: center middle;
-        padding: 1;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+    }
+
+    BoardWidget {
+        width: 100%;
+        height: 100%;
     }
 
     StatusWidget {
         dock: top;
+        height: 3;
     }
 
     Footer {
         dock: bottom;
+        height: 1;
     }
     """
 
@@ -111,6 +123,8 @@ class GameScreen(Screen):
         self._elapsed_time = timedelta()
         self._game_state = "In Progress"
         self._is_paused = False
+        self._validation_enabled = False
+        self._cursor_opacity = 80  # Default 80%
 
     def compose(self) -> ComposeResult:
         """Compose the game screen layout.
@@ -132,6 +146,7 @@ class GameScreen(Screen):
             yield BoardWidget(
                 board=self._board,
                 cursor_position=self._cursor_position,
+                cursor_opacity=self._cursor_opacity,
                 id="game-board",
             )
 
@@ -154,10 +169,8 @@ class GameScreen(Screen):
         Args:
             event: The key event.
         """
+        # When paused, block all input except 'p' which is handled by BINDINGS
         if self._is_paused:
-            # Only allow unpause when paused
-            if event.key == "p":
-                self.action_pause()
             return
 
         key = event.key
@@ -203,9 +216,29 @@ class GameScreen(Screen):
         except IndexError:
             return
 
-        # Call the move callback if provided
+        # Always allow the move (no blocking)
         if self._on_move:
             self._on_move(self._cursor_position, number)
+        else:
+            # Demo mode - update board directly
+            try:
+                self._board.set_cell_value(self._cursor_position, number, is_fixed=False)
+                self.refresh()
+            except Exception:
+                pass
+
+        # Validate only if validation mode is enabled
+        if self._validation_enabled:
+            is_valid = self._validate_move(number)
+            if not is_valid:
+                self.add_error(self._cursor_position)
+                self._show_message(f"Invalid placement: {number}")
+            else:
+                self.clear_error(self._cursor_position)
+                self._show_message(f"Valid: {number}")
+        else:
+            # Clear any previous error markers when validation is off
+            self.clear_error(self._cursor_position)
 
     def _handle_clear_cell(self) -> None:
         """Handle clearing the current cell."""
@@ -385,6 +418,108 @@ class GameScreen(Screen):
         else:
             self.set_game_state("In Progress")
             self._show_message("Game Resumed")
+
+    def action_toggle_validation(self) -> None:
+        """Action to toggle validation mode on/off."""
+        self._validation_enabled = not self._validation_enabled
+        if self._validation_enabled:
+            self._show_message("Validation ON - Invalid moves shown in red")
+            # Validate all current moves
+            self._validate_all_cells()
+        else:
+            self._show_message("Validation OFF - All moves allowed")
+            # Clear all error markers
+            self.clear_all_errors()
+
+    def action_adjust_transparency(self) -> None:
+        """Action to adjust cursor transparency."""
+        # Cycle through transparency levels: 100% -> 80% -> 60% -> 40% -> 20% -> 100%
+        transparency_levels = [100, 80, 60, 40, 20]
+        try:
+            current_index = transparency_levels.index(self._cursor_opacity)
+            next_index = (current_index + 1) % len(transparency_levels)
+            self._cursor_opacity = transparency_levels[next_index]
+        except ValueError:
+            # Current value not in list, reset to default
+            self._cursor_opacity = 80
+
+        # Update board widget
+        try:
+            board_widget = self.query_one("#game-board", BoardWidget)
+            board_widget.set_cursor_opacity(self._cursor_opacity)
+            self._show_message(f"Cursor opacity: {self._cursor_opacity}%")
+        except Exception:
+            pass
+
+    def _validate_move(self, value: int) -> bool:
+        """Validate if a move is valid according to Sudoku rules.
+
+        Args:
+            value: The value to validate at current cursor position.
+
+        Returns:
+            True if the move is valid, False otherwise.
+        """
+        if not self._board:
+            return True
+
+        try:
+            # Check row
+            row = self._cursor_position.row
+            for col in range(self._board.size.cols):
+                if col != self._cursor_position.col:
+                    cell = self._board.get_cell(Position(row, col))
+                    if cell.get_numeric_value() == value:
+                        return False
+
+            # Check column
+            col = self._cursor_position.col
+            for row in range(self._board.size.rows):
+                if row != self._cursor_position.row:
+                    cell = self._board.get_cell(Position(row, col))
+                    if cell.get_numeric_value() == value:
+                        return False
+
+            # Check 3x3 box
+            box_row = (self._cursor_position.row // 3) * 3
+            box_col = (self._cursor_position.col // 3) * 3
+            for row in range(box_row, box_row + 3):
+                for col in range(box_col, box_col + 3):
+                    if row != self._cursor_position.row or col != self._cursor_position.col:
+                        cell = self._board.get_cell(Position(row, col))
+                        if cell.get_numeric_value() == value:
+                            return False
+
+        except Exception:
+            return True
+        else:
+            return True
+
+    def _validate_all_cells(self) -> None:
+        """Validate all cells on the board and mark errors."""
+        if not self._board:
+            return
+
+        self.clear_all_errors()
+
+        for row in range(self._board.size.rows):
+            for col in range(self._board.size.cols):
+                position = Position(row, col)
+                cell = self._board.get_cell(position)
+                value = cell.get_numeric_value()
+
+                # Skip empty and fixed cells
+                if value is None or cell.is_fixed:
+                    continue
+
+                # Temporarily set cursor to this position for validation
+                old_cursor = self._cursor_position
+                self._cursor_position = position
+                is_valid = self._validate_move(value)
+                self._cursor_position = old_cursor
+
+                if not is_valid:
+                    self.add_error(position)
 
     @property
     def cursor_position(self) -> Position:

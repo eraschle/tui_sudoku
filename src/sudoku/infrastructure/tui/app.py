@@ -42,13 +42,6 @@ class SudokuApp(App):
         Binding("ctrl+q", "quit", "Quit", show=False),
     ]
 
-    SCREENS = {
-        "menu": MenuScreen,
-        "player_input": PlayerInputScreen,
-        "game": GameScreen,
-        "statistics": StatisticsScreen,
-    }
-
     def __init__(
         self,
         controller: AppController | None = None,
@@ -71,13 +64,16 @@ class SudokuApp(App):
 
         Sets up initial state and navigates to the main menu.
         """
-        # Install all screens
-        self.install_screen(MenuScreen(), name="menu")
-        self.install_screen(
-            PlayerInputScreen(on_confirm=self._handle_player_input),
-            name="player_input",
-        )
-        self.install_screen(StatisticsScreen(), name="statistics")
+        # Install all screens only if not already installed
+        if not self.is_screen_installed("menu"):
+            self.install_screen(MenuScreen(), name="menu")
+        if not self.is_screen_installed("player_input"):
+            self.install_screen(
+                PlayerInputScreen(on_confirm=self._handle_player_input),
+                name="player_input",
+            )
+        if not self.is_screen_installed("statistics"):
+            self.install_screen(StatisticsScreen(), name="statistics")
 
         # Start at the menu
         self.push_screen("menu")
@@ -112,15 +108,25 @@ class SudokuApp(App):
         Args:
             game_state: The initial game state DTO.
         """
+        # Get the board from the current game
+        board = None
+        if self._controller:
+            current_game = self._controller.get_current_game()
+            if current_game:
+                board = current_game.board
+
         # Create and show game screen
         game_screen = GameScreen(
+            board=board,
             player_name=self._current_player,
             difficulty=self._current_difficulty,
             on_move=self._handle_move,
             on_new_game=self._handle_new_game_request,
         )
 
-        # Install and push the game screen
+        # Uninstall old game screen if it exists, then install the new one
+        if self.is_screen_installed("game"):
+            self.uninstall_screen("game")
         self.install_screen(game_screen, name="game")
         self.switch_screen("game")
 
@@ -135,17 +141,16 @@ class SudokuApp(App):
             return
 
         try:
+            # Make the move through the controller (no validation blocking)
             success, _game_state = self._controller.make_move(position, value)
 
             # Update the game screen with the new state
             game_screen = self.get_screen("game")
             if isinstance(game_screen, GameScreen):
-                if success:
-                    game_screen.clear_error(position)
-                    # Update board would happen through game_state
-                    # In a complete implementation
-                else:
-                    game_screen.add_error(position)
+                # Always update the board display
+                current_game = self._controller.get_current_game()
+                if current_game:
+                    game_screen.update_board(current_game.board)
 
                 # Check for game completion
                 if self._controller.check_game_completion():
@@ -153,7 +158,7 @@ class SudokuApp(App):
                     self._show_completion_message()
 
         except Exception as e:
-            self._show_error(f"Invalid move: {e}")
+            self._show_error(f"Error: {e}")
 
     def _handle_new_game_request(self) -> None:
         """Handle request to start a new game.
@@ -258,6 +263,9 @@ class DemoSudokuApp(SudokuApp):
             difficulty=self._current_difficulty,
         )
 
+        # Uninstall old game screen if it exists, then install the new one
+        if self.is_screen_installed("game"):
+            self.uninstall_screen("game")
         self.install_screen(game_screen, name="game")
         self.switch_screen("game")
 

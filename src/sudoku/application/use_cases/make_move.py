@@ -67,30 +67,14 @@ class MakeMoveUseCase:
                 updated_state = GameStateDTO.from_game(game)
                 return False, updated_state
 
-        # Convert board to 2D list for validator
-        current_board = self._board_to_list(game.board)
-
-        # Validate the move using the validator
-        is_valid = self._validator.is_valid_move(
-            board=current_board,
-            row=position.row,
-            col=position.col,
-            num=value,
-            box_width=box_width,
-            box_height=box_height,
-        )
-
-        if is_valid:
-            try:
-                game.make_move(position, value)
-                updated_state = GameStateDTO.from_game(game)
-                return True, updated_state
-            except ValueError:
-                # Move failed (e.g., fixed cell)
-                updated_state = GameStateDTO.from_game(game)
-                return False, updated_state
-        else:
-            # Invalid move according to Sudoku rules
+        # Always allow the move without validation
+        # Validation is now optional and handled in the UI layer
+        try:
+            game.make_move(position, value)
+            updated_state = GameStateDTO.from_game(game)
+            return True, updated_state
+        except ValueError:
+            # Move failed (e.g., fixed cell)
             updated_state = GameStateDTO.from_game(game)
             return False, updated_state
 
