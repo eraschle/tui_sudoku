@@ -32,7 +32,11 @@ class MakeMoveUseCase:
         self._validator = validator
 
     def execute(
-        self, game: Game, position: Position, value: int | None
+        self,
+        game: Game,
+        position: Position,
+        value: int | None,
+        validate: bool = True,
     ) -> tuple[bool, GameStateDTO]:
         """Execute a move at the specified position.
 
@@ -40,6 +44,7 @@ class MakeMoveUseCase:
             game: The current game instance.
             position: The position where to make the move.
             value: The value to place (1-9 for standard Sudoku, None to clear).
+            validate: Whether to validate the move before applying (default: True).
 
         Returns:
             tuple[bool, GameStateDTO]: A tuple containing:
@@ -67,8 +72,23 @@ class MakeMoveUseCase:
                 updated_state = GameStateDTO.from_game(game)
                 return False, updated_state
 
-        # Always allow the move without validation
-        # Validation is now optional and handled in the UI layer
+        # Validate move if requested
+        if validate:
+            board_2d = self._board_to_list(game.board)
+            is_valid = self._validator.is_valid_move(
+                board_2d,
+                position.row,
+                position.col,
+                value,
+                box_width,
+                box_height,
+            )
+            if not is_valid:
+                # Validation failed, return without making move
+                updated_state = GameStateDTO.from_game(game)
+                return False, updated_state
+
+        # Apply the move
         try:
             game.make_move(position, value)
             updated_state = GameStateDTO.from_game(game)

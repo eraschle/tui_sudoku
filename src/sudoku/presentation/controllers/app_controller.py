@@ -82,12 +82,19 @@ class AppController:
 
         return game_state
 
-    def make_move(self, position: Position, value: int | None) -> tuple[bool, GameStateDTO]:
+    def make_move(
+        self,
+        position: Position,
+        value: int | None,
+        validate: bool = False,
+    ) -> tuple[bool, GameStateDTO]:
         """Make a move on the current game board.
 
         Args:
             position: The position where to make the move.
             value: The value to place (1-9), or None to clear the cell.
+            validate: Whether to validate at use-case level (default: False).
+                     When False, validation is handled by the UI layer.
 
         Returns:
             Tuple of (success, updated_game_state).
@@ -101,10 +108,12 @@ class AppController:
             raise ValueError(msg)
 
         # Execute the move through use case
+        # By default, skip use-case validation since UI handles it
         success, game_state = self._make_move_use_case.execute(
             game=self._current_game,
             position=position,
             value=value,
+            validate=validate,
         )
 
         # Check if game is complete after the move

@@ -869,11 +869,12 @@ game.make_move(Position(0, 0), 5)  # Both observers notified automatically
 
 **Priority: CRITICAL - Must be addressed immediately**
 
-- [ ] **Remove duplicate validation code** (3 points)
-  - Extract validation interface
-  - Inject SudokuValidator into GameScreen
-  - Remove duplicate `_validate_move()` logic
-  - Add tests for injected validator
+- [x] **Remove duplicate validation code** (3 points) ✅ COMPLETED (Commit: eee2232)
+  - ✅ Extract validation interface
+  - ✅ Inject SudokuValidator into GameScreen
+  - ✅ Remove duplicate `_validate_move()` logic
+  - ✅ Eliminated magic numbers (hardcoded "3")
+  - Note: Added tests for injected validator (pending)
 
 - [ ] **Fix MakeMoveUseCase dependency usage** (2 points)
   - Either restore validator usage with flag
