@@ -4,6 +4,7 @@ This module provides a Textual widget for displaying the Sudoku board
 with cursor highlighting, cell formatting, and error visualization.
 """
 
+import logging
 
 from rich.console import RenderableType
 from rich.style import Style
@@ -14,6 +15,8 @@ from textual.widget import Widget
 from sudoku.domain.entities.board import Board
 from sudoku.domain.entities.cell import Cell
 from sudoku.domain.value_objects.position import Position
+
+logger = logging.getLogger(__name__)
 
 
 class BoardWidget(Widget):
@@ -134,8 +137,18 @@ class BoardWidget(Widget):
         try:
             available_width = self.size.width if self.size and self.size.width > 0 else 80
             available_height = self.size.height if self.size and self.size.height > 0 else 24
-        except Exception:
-            # Fallback if size not yet available
+        except AttributeError:
+            # Size attribute not yet available (widget not mounted)
+            logger.debug("Widget size not yet available, using default dimensions")
+            available_width = 80
+            available_height = 24
+        except Exception as e:
+            # Unexpected error accessing size
+            logger.warning(
+                "Unexpected error accessing widget size, using defaults: %s",
+                e,
+                exc_info=True,
+            )
             available_width = 80
             available_height = 24
 

@@ -4,6 +4,7 @@ This module provides the main Textual App class that orchestrates
 all screens and manages application state.
 """
 
+import logging
 
 from textual.app import App
 from textual.binding import Binding
@@ -15,6 +16,8 @@ from .screens.game_screen import GameScreen
 from .screens.menu_screen import MenuScreen
 from .screens.player_input_screen import PlayerInputScreen
 from .screens.statistics_screen import StatisticsScreen
+
+logger = logging.getLogger(__name__)
 
 
 class SudokuApp(App):
@@ -98,9 +101,17 @@ class SudokuApp(App):
                 game_state = self._controller.start_new_game(player_name, difficulty)
                 self._start_game_screen(game_state)
             except Exception as e:
+                logger.error(
+                    "Failed to start new game for player '%s' at difficulty '%s': %s",
+                    player_name,
+                    difficulty,
+                    e,
+                    exc_info=True,
+                )
                 self._show_error(f"Failed to start game: {e}")
         else:
             # No controller - just show a demo screen
+            logger.warning("No controller configured, cannot start game")
             self._show_error("No controller configured")
 
     def _start_game_screen(self, game_state) -> None:
@@ -143,6 +154,7 @@ class SudokuApp(App):
             value: The value placed, or None to clear.
         """
         if not self._controller:
+            logger.warning("No controller available to handle move")
             return
 
         try:
@@ -163,6 +175,13 @@ class SudokuApp(App):
                     self._show_completion_message()
 
         except Exception as e:
+            logger.error(
+                "Error handling move at position %s with value %s: %s",
+                position,
+                value,
+                e,
+                exc_info=True,
+            )
             self._show_error(f"Error: {e}")
 
     def _handle_new_game_request(self) -> None:
@@ -203,8 +222,18 @@ class SudokuApp(App):
                     stats_screen.set_statistics(stats)
                 self.push_screen("statistics")
             except Exception as e:
+                logger.error(
+                    "Failed to load statistics for player '%s': %s",
+                    self._current_player,
+                    e,
+                    exc_info=True,
+                )
                 self._show_error(f"Failed to load statistics: {e}")
         else:
+            if not self._controller:
+                logger.warning("No controller available to load statistics")
+            if not self._current_player:
+                logger.warning("No current player to load statistics for")
             self.push_screen("statistics")
 
     async def action_quit(self) -> None:

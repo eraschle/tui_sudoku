@@ -4,12 +4,14 @@ This module provides the main game screen where users interact with
 the Sudoku board, make moves, and complete puzzles.
 """
 
+import logging
 from collections.abc import Callable
 from datetime import timedelta
 from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
+from textual.css.query import NoMatches
 from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Footer, Header
@@ -20,6 +22,8 @@ from sudoku.infrastructure.tui.components.board_widget import BoardWidget
 from sudoku.infrastructure.tui.components.status_widget import StatusWidget
 from sudoku.infrastructure.tui.input.key_mappings import KeyMapper, NavigationKey
 from sudoku.infrastructure.validators.sudoku_validator import SudokuValidator
+
+logger = logging.getLogger(__name__)
 
 
 class GameScreen(Screen):
@@ -228,8 +232,20 @@ class GameScreen(Screen):
             try:
                 self._board.set_cell_value(self._cursor_position, number, is_fixed=False)
                 self.refresh()
-            except Exception:
-                pass
+            except IndexError as e:
+                logger.warning(
+                    "Invalid position %s for board update in demo mode: %s",
+                    self._cursor_position,
+                    e,
+                )
+            except Exception as e:
+                logger.error(
+                    "Failed to update board in demo mode at position %s with value %d: %s",
+                    self._cursor_position,
+                    number,
+                    e,
+                    exc_info=True,
+                )
 
         # Validate only if validation mode is enabled
         if self._validation_enabled:
@@ -305,8 +321,18 @@ class GameScreen(Screen):
                 elapsed_time=self._elapsed_time,
                 game_state=self._game_state,
             )
-        except Exception:
-            pass  # Widget might not be mounted yet
+        except NoMatches:
+            logger.warning(
+                "Status widget not found, cannot update status (elapsed_time=%s, state=%s)",
+                self._elapsed_time,
+                self._game_state,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to update status widget: %s",
+                e,
+                exc_info=True,
+            )
 
     def _show_message(self, message: str) -> None:
         """Display a message in the status bar.
@@ -319,8 +345,20 @@ class GameScreen(Screen):
             status_widget.set_message(message)
             # Clear message after 3 seconds
             self.set_timer(3.0, status_widget.clear_message)
-        except Exception:
-            pass
+        except NoMatches:
+            logger.warning(
+                "Status widget not found, message not displayed: %s",
+                message,
+            )
+            # Fallback: show to user via notification
+            self.notify(message, severity="information")
+        except Exception as e:
+            logger.error(
+                "Failed to show message '%s': %s",
+                message,
+                e,
+                exc_info=True,
+            )
 
     def update_board(self, board: Board) -> None:
         """Update the displayed board.
@@ -332,8 +370,18 @@ class GameScreen(Screen):
         try:
             board_widget = self.query_one("#game-board", BoardWidget)
             board_widget.set_board(board)
-        except Exception:
-            pass  # Widget might not be mounted yet
+        except NoMatches:
+            logger.warning(
+                "Board widget not found, cannot update board display",
+            )
+            # Don't notify user - widget might not be mounted yet during initialization
+        except Exception as e:
+            logger.error(
+                "Failed to update board display: %s",
+                e,
+                exc_info=True,
+            )
+            self.notify("Error updating board display", severity="error")
 
     def set_cursor_position(self, position: Position) -> None:
         """Set the cursor position.
@@ -345,8 +393,18 @@ class GameScreen(Screen):
         try:
             board_widget = self.query_one("#game-board", BoardWidget)
             board_widget.set_cursor_position(position)
-        except Exception:
-            pass  # Widget might not be mounted yet
+        except NoMatches:
+            logger.warning(
+                "Board widget not found, cannot update cursor position to %s",
+                position,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to set cursor position to %s: %s",
+                position,
+                e,
+                exc_info=True,
+            )
 
     def add_error(self, position: Position) -> None:
         """Mark a position as having an error.
@@ -357,8 +415,18 @@ class GameScreen(Screen):
         try:
             board_widget = self.query_one("#game-board", BoardWidget)
             board_widget.add_error(position)
-        except Exception:
-            pass
+        except NoMatches:
+            logger.warning(
+                "Board widget not found, cannot mark error at position %s",
+                position,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to add error marker at position %s: %s",
+                position,
+                e,
+                exc_info=True,
+            )
 
     def clear_error(self, position: Position) -> None:
         """Clear an error at a position.
@@ -369,16 +437,34 @@ class GameScreen(Screen):
         try:
             board_widget = self.query_one("#game-board", BoardWidget)
             board_widget.clear_error(position)
-        except Exception:
-            pass
+        except NoMatches:
+            logger.warning(
+                "Board widget not found, cannot clear error at position %s",
+                position,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to clear error marker at position %s: %s",
+                position,
+                e,
+                exc_info=True,
+            )
 
     def clear_all_errors(self) -> None:
         """Clear all error markers."""
         try:
             board_widget = self.query_one("#game-board", BoardWidget)
             board_widget.clear_all_errors()
-        except Exception:
-            pass
+        except NoMatches:
+            logger.warning(
+                "Board widget not found, cannot clear all error markers",
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to clear all error markers: %s",
+                e,
+                exc_info=True,
+            )
 
     def set_game_state(self, state: str) -> None:
         """Set the game state.
@@ -445,6 +531,10 @@ class GameScreen(Screen):
             self._cursor_opacity = transparency_levels[next_index]
         except ValueError:
             # Current value not in list, reset to default
+            logger.debug(
+                "Cursor opacity %d not in predefined levels, resetting to default",
+                self._cursor_opacity,
+            )
             self._cursor_opacity = 80
 
         # Update board widget
@@ -452,8 +542,23 @@ class GameScreen(Screen):
             board_widget = self.query_one("#game-board", BoardWidget)
             board_widget.set_cursor_opacity(self._cursor_opacity)
             self._show_message(f"Cursor opacity: {self._cursor_opacity}%")
-        except Exception:
-            pass
+        except NoMatches:
+            logger.warning(
+                "Board widget not found, cannot adjust cursor opacity to %d%%",
+                self._cursor_opacity,
+            )
+            self.notify(
+                f"Cursor opacity: {self._cursor_opacity}%",
+                severity="information",
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to adjust cursor opacity to %d%%: %s",
+                self._cursor_opacity,
+                e,
+                exc_info=True,
+            )
+            self.notify("Error adjusting cursor transparency", severity="error")
 
     def _board_to_list(self) -> list[list[int]]:
         """Convert Board entity to 2D list for validator.
