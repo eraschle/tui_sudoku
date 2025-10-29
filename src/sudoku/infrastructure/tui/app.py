@@ -8,6 +8,7 @@ all screens and manages application state.
 from textual.app import App
 from textual.binding import Binding
 
+from sudoku.infrastructure.validators.sudoku_validator import create_sudoku_validator
 from sudoku.presentation.controllers.app_controller import AppController
 
 from .screens.game_screen import GameScreen
@@ -115,13 +116,17 @@ class SudokuApp(App):
             if current_game:
                 board = current_game.board
 
-        # Create and show game screen
+        # Create validator instance
+        validator = create_sudoku_validator()
+
+        # Create and show game screen with validator injection
         game_screen = GameScreen(
             board=board,
             player_name=self._current_player,
             difficulty=self._current_difficulty,
             on_move=self._handle_move,
             on_new_game=self._handle_new_game_request,
+            validator=validator,
         )
 
         # Uninstall old game screen if it exists, then install the new one
@@ -257,10 +262,14 @@ class DemoSudokuApp(SudokuApp):
 
             board.set_cell_value(Position(row, col), value, is_fixed=True)
 
+        # Create validator instance
+        validator = create_sudoku_validator()
+
         game_screen = GameScreen(
             board=board,
             player_name=self._current_player,
             difficulty=self._current_difficulty,
+            validator=validator,
         )
 
         # Uninstall old game screen if it exists, then install the new one

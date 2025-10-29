@@ -19,6 +19,7 @@ from sudoku.domain.value_objects.position import Position
 from sudoku.infrastructure.tui.components.board_widget import BoardWidget
 from sudoku.infrastructure.tui.components.status_widget import StatusWidget
 from sudoku.infrastructure.tui.input.key_mappings import KeyMapper, NavigationKey
+from sudoku.infrastructure.validators.sudoku_validator import SudokuValidator
 
 
 class GameScreen(Screen):
@@ -95,6 +96,7 @@ class GameScreen(Screen):
         on_move: Callable[[Position, int | None], None] | None = None,
         on_new_game: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
+        validator: SudokuValidator | None = None,
         name: str | None = None,
         id: str | None = None,
     ) -> None:
@@ -107,6 +109,7 @@ class GameScreen(Screen):
             on_move: Callback(position, value) for when a move is made.
             on_new_game: Callback for new game request.
             on_quit: Callback for quit request.
+            validator: Validator for Sudoku rule validation (optional).
             name: The name of the screen.
             id: The ID of the screen.
         """
@@ -117,6 +120,7 @@ class GameScreen(Screen):
         self._on_move = on_move
         self._on_new_game = on_new_game
         self._on_quit = on_quit
+        self._validator = validator
 
         self._cursor_position = Position(0, 0)
         self._key_mapper = KeyMapper(enable_qwertz=True, enable_vim_navigation=True)
@@ -451,6 +455,30 @@ class GameScreen(Screen):
         except Exception:
             pass
 
+    def _board_to_list(self) -> list[list[int]]:
+        """Convert Board entity to 2D list for validator.
+
+        Returns:
+            2D list representation of the board (empty cells as 0).
+        """
+        if not self._board:
+            return []
+
+        size = self._board.size.rows
+        result = []
+        for row in range(size):
+            row_values = []
+            for col in range(size):
+                position = Position(row, col)
+                cell = self._board.get_cell(position)
+                numeric_value = cell.get_numeric_value()
+                if numeric_value is None:
+                    row_values.append(0)
+                else:
+                    row_values.append(numeric_value)
+            result.append(row_values)
+        return result
+
     def _validate_move(self, value: int) -> bool:
         """Validate if a move is valid according to Sudoku rules.
 
@@ -463,37 +491,26 @@ class GameScreen(Screen):
         if not self._board:
             return True
 
-        try:
-            # Check row
-            row = self._cursor_position.row
-            for col in range(self._board.size.cols):
-                if col != self._cursor_position.col:
-                    cell = self._board.get_cell(Position(row, col))
-                    if cell.get_numeric_value() == value:
-                        return False
-
-            # Check column
-            col = self._cursor_position.col
-            for row in range(self._board.size.rows):
-                if row != self._cursor_position.row:
-                    cell = self._board.get_cell(Position(row, col))
-                    if cell.get_numeric_value() == value:
-                        return False
-
-            # Check 3x3 box
-            box_row = (self._cursor_position.row // 3) * 3
-            box_col = (self._cursor_position.col // 3) * 3
-            for row in range(box_row, box_row + 3):
-                for col in range(box_col, box_col + 3):
-                    if row != self._cursor_position.row or col != self._cursor_position.col:
-                        cell = self._board.get_cell(Position(row, col))
-                        if cell.get_numeric_value() == value:
-                            return False
-
-        except Exception:
+        # Fallback to True if no validator is injected
+        if self._validator is None:
             return True
-        else:
-            return True
+
+        # Convert board to 2D list format
+        board_2d = self._board_to_list()
+
+        # Clear the current cell in the board copy for validation
+        # The validator expects the cell to be empty when checking if a move is valid
+        board_2d[self._cursor_position.row][self._cursor_position.col] = 0
+
+        # Delegate validation to the injected validator
+        return self._validator.is_valid_move(
+            board_2d,
+            self._cursor_position.row,
+            self._cursor_position.col,
+            value,
+            self._board.size.box_cols,
+            self._board.size.box_rows,
+        )
 
     def _validate_all_cells(self) -> None:
         """Validate all cells on the board and mark errors."""
