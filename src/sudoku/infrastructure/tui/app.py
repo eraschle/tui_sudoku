@@ -9,7 +9,7 @@ import logging
 from textual.app import App
 from textual.binding import Binding
 
-from sudoku.infrastructure.validators.sudoku_validator import create_sudoku_validator
+from sudoku.domain.strategies import create_validation_strategy
 from sudoku.presentation.controllers.app_controller import AppController
 
 from .screens.game_screen import GameScreen
@@ -127,17 +127,17 @@ class SudokuApp(App):
             if current_game:
                 board = current_game.board
 
-        # Create validator instance
-        validator = create_sudoku_validator()
+        # Create validation strategy
+        validation_strategy = create_validation_strategy("strict")
 
-        # Create and show game screen with validator injection
+        # Create and show game screen with strategy injection
         game_screen = GameScreen(
             board=board,
             player_name=self._current_player,
             difficulty=self._current_difficulty,
             on_move=self._handle_move,
             on_new_game=self._handle_new_game_request,
-            validator=validator,
+            validation_strategy=validation_strategy,
         )
 
         # Uninstall old game screen if it exists, then install the new one
@@ -291,14 +291,14 @@ class DemoSudokuApp(SudokuApp):
 
             board.set_cell_value(Position(row, col), value, is_fixed=True)
 
-        # Create validator instance
-        validator = create_sudoku_validator()
+        # Create validation strategy
+        validation_strategy = create_validation_strategy("strict")
 
         game_screen = GameScreen(
             board=board,
             player_name=self._current_player,
             difficulty=self._current_difficulty,
-            validator=validator,
+            validation_strategy=validation_strategy,
         )
 
         # Uninstall old game screen if it exists, then install the new one

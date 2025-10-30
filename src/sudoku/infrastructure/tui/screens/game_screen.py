@@ -17,6 +17,13 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header
 
 from sudoku.domain.entities.board import Board
+from sudoku.domain.strategies import (
+    NoValidation,
+    RelaxedValidation,
+    StrictSudokuValidation,
+    ValidationStrategy,
+    create_validation_strategy,
+)
 from sudoku.domain.value_objects.position import Position
 from sudoku.infrastructure.tui.components.board_widget import BoardWidget
 from sudoku.infrastructure.tui.components.status_widget import StatusWidget
@@ -26,7 +33,6 @@ from sudoku.infrastructure.tui.helpers import (
     GameStateManager,
 )
 from sudoku.infrastructure.tui.input.key_mappings import KeyMapper, NavigationKey
-from sudoku.infrastructure.validators.sudoku_validator import SudokuValidator
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +65,7 @@ class GameScreen(Screen):
         ("escape", "back_to_menu", "Menu"),
         ("p", "pause", "Pause"),
         ("v", "toggle_validation", "Validation"),
+        ("m", "cycle_validation_mode", "Cycle Mode"),
         ("t", "adjust_transparency", "Transparency"),
     ]
 
@@ -105,7 +112,7 @@ class GameScreen(Screen):
         on_move: Callable[[Position, int | None], None] | None = None,
         on_new_game: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
-        validator: SudokuValidator | None = None,
+        validation_strategy: ValidationStrategy | None = None,
         name: str | None = None,
         id: str | None = None,
     ) -> None:
@@ -118,7 +125,7 @@ class GameScreen(Screen):
             on_move: Callback(position, value) for when a move is made.
             on_new_game: Callback for new game request.
             on_quit: Callback for quit request.
-            validator: Validator for Sudoku rule validation (optional).
+            validation_strategy: Strategy for validation (optional, defaults to strict).
             name: The name of the screen.
             id: The ID of the screen.
         """
@@ -128,7 +135,11 @@ class GameScreen(Screen):
         self._difficulty = difficulty
         self._on_new_game = on_new_game
         self._on_quit = on_quit
-        self._validator = validator
+
+        # Use provided strategy or default to strict
+        if validation_strategy is None:
+            validation_strategy = create_validation_strategy("strict")
+        self._validation_strategy = validation_strategy
 
         # Create helper objects (Composition over inheritance)
         self._input_handler = GameInputHandler(on_move=on_move)
@@ -517,62 +528,59 @@ class GameScreen(Screen):
             )
             self.notify("Error adjusting cursor transparency", severity="error")
 
-    def _board_to_list(self) -> list[list[int]]:
-        """Convert Board entity to 2D list for validator.
+    def action_cycle_validation_mode(self) -> None:
+        """Cycle through validation modes."""
+        modes = ["strict", "relaxed", "none"]
 
-        Returns:
-            2D list representation of the board (empty cells as 0).
+        # Detect current mode
+        if isinstance(self._validation_strategy, StrictSudokuValidation):
+            current_idx = 0
+        elif isinstance(self._validation_strategy, RelaxedValidation):
+            current_idx = 1
+        else:  # NoValidation
+            current_idx = 2
+
+        # Get next mode
+        next_idx = (current_idx + 1) % len(modes)
+        next_mode = modes[next_idx]
+
+        self.set_validation_strategy(next_mode)
+
+    def set_validation_strategy(self, mode: str) -> None:
+        """Change validation strategy at runtime.
+
+        Args:
+            mode: Validation mode ('strict', 'relaxed', 'none').
         """
-        if not self._board:
-            return []
+        try:
+            self._validation_strategy = create_validation_strategy(mode)
+            logger.info("Validation strategy changed to: %s", mode)
+            self._show_message(f"Validation mode: {mode.capitalize()}")
 
-        size = self._board.size.rows
-        result = []
-        for row in range(size):
-            row_values = []
-            for col in range(size):
-                position = Position(row, col)
-                cell = self._board.get_cell(position)
-                numeric_value = cell.get_numeric_value()
-                if numeric_value is None:
-                    row_values.append(0)
-                else:
-                    row_values.append(numeric_value)
-            result.append(row_values)
-        return result
+            # Re-validate all cells with new strategy
+            if self._validation_enabled:
+                self._validate_all_cells()
+        except ValueError as e:
+            logger.error("Failed to set validation strategy: %s", e)
+            self._show_message(f"Invalid validation mode: {mode}")
 
     def _validate_move(self, value: int) -> bool:
-        """Validate if a move is valid according to Sudoku rules.
+        """Validate move using the current validation strategy.
 
         Args:
             value: The value to validate at current cursor position.
 
         Returns:
-            True if the move is valid, False otherwise.
+            bool: True if the move is valid, False otherwise.
         """
         if not self._board:
             return True
 
-        # Fallback to True if no validator is injected
-        if self._validator is None:
-            return True
-
-        # Convert board to 2D list format
-        board_2d = self._board_to_list()
-
-        # Clear the current cell in the board copy for validation
-        # The validator expects the cell to be empty when checking if a move is valid
-        position = self._navigator.position
-        board_2d[position.row][position.col] = 0
-
-        # Delegate validation to the injected validator
-        return self._validator.is_valid_move(
-            board_2d,
-            position.row,
-            position.col,
-            value,
-            self._board.size.box_cols,
-            self._board.size.box_rows,
+        # Use the injected validation strategy
+        return self._validation_strategy.validate_move(
+            self._board,
+            self._navigator.position,
+            value
         )
 
     def _validate_all_cells(self) -> None:
