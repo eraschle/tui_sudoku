@@ -908,23 +908,26 @@ game.make_move(Position(0, 0), 5)  # Both observers notified automatically
   - ✅ Tests passing (356/375, 0 new failures)
   - ✅ Delegation pattern implemented (12 methods refactored)
 
-- [ ] **Implement validation strategy pattern** (2 points)
-  - Create ValidationStrategy protocol
-  - Implement StrictValidation, NoValidation
-  - Inject strategy into GameScreen
-  - Add strategy selection UI
+- [x] **Implement validation strategy pattern** (2 points) ✅ COMPLETED (Commit: 53228a4)
+  - ✅ Created ValidationStrategy protocol
+  - ✅ Implemented StrictValidation, RelaxedValidation, NoValidation
+  - ✅ Injected strategy into GameScreen
+  - ✅ Added strategy cycling UI ('m' key binding)
+  - ✅ Runtime strategy switching supported
 
-- [ ] **Break down long methods in BoardWidget** (2 points)
-  - Extract `_create_base_table()`
-  - Extract `_add_board_rows()`
-  - Extract `_add_cell_row()`
-  - Extract `_add_separator_row()`
+- [x] **Break down long methods in BoardWidget** (2 points) ✅ COMPLETED (Commit: f53d9e0)
+  - ✅ Reduced _calculate_cell_size() from 51 to 10 lines (-80%)
+  - ✅ Extracted 6 focused helper methods
+  - ✅ All business methods ≤ 20 lines (100% compliance)
+  - ✅ Improved readability and testability
 
-- [ ] **Split BoardWidget and CompactBoardWidget** (2 points)
-  - Create BoardRenderer protocol
-  - Implement StandardBoardRenderer
-  - Implement CompactBoardRenderer
-  - Use composition in BoardWidget
+- [x] **Split BoardWidget and CompactBoardWidget** (2 points) ✅ COMPLETED (Commit: f53d9e0)
+  - ✅ Created BoardRenderer protocol
+  - ✅ Implemented StandardBoardRenderer (full decorations)
+  - ✅ Implemented CompactBoardRenderer (minimal style)
+  - ✅ BoardWidget uses composition (Strategy Pattern)
+  - ✅ Removed CompactBoardWidget class (LSP violation eliminated)
+  - ✅ BoardWidget reduced by 48% (529 → 276 lines)
 
 **Estimated Effort:** 9 points
 **Expected Outcome:** Cleaner code, better SRP compliance, easier testing
