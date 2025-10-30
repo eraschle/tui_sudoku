@@ -2,32 +2,38 @@
 
 This module provides a Textual widget for displaying the Sudoku board
 with cursor highlighting, cell formatting, and error visualization.
+
+The widget uses the Strategy Pattern to delegate rendering logic to
+specialized renderer implementations (BoardRenderer protocol).
 """
 
 import logging
 
 from rich.console import RenderableType
-from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 from textual.widget import Widget
 
 from sudoku.domain.entities.board import Board
-from sudoku.domain.entities.cell import Cell
 from sudoku.domain.value_objects.position import Position
+from sudoku.infrastructure.tui.renderers import BoardRenderer, create_board_renderer
 
 logger = logging.getLogger(__name__)
 
 
 class BoardWidget(Widget):
-    """Widget for rendering the Sudoku game board.
+    """Widget for rendering the Sudoku game board using Strategy Pattern.
 
     This widget displays the game board with:
     - Fixed cells (puzzle givens) in a distinct style
     - Editable cells in another style
     - Cursor highlighting for the selected cell
     - Error highlighting for invalid placements
-    - Grid lines separating 3x3 boxes
+    - Pluggable rendering strategies via BoardRenderer protocol
+
+    The rendering logic is delegated to a BoardRenderer implementation,
+    allowing different visual styles (standard, compact, etc.) without
+    modifying the widget logic itself.
 
     Attributes:
         board: The Sudoku board to render.
@@ -53,6 +59,7 @@ class BoardWidget(Widget):
         id: str | None = None,
         cursor_opacity: int = 80,
         margin: int = 2,
+        renderer: BoardRenderer | None = None,
     ) -> None:
         """Initialize the board widget.
 
@@ -63,6 +70,7 @@ class BoardWidget(Widget):
             id: The ID of the widget.
             cursor_opacity: Cursor background opacity (0-100).
             margin: Margin around the board in characters.
+            renderer: Board renderer strategy. If None, uses standard renderer.
         """
         super().__init__(name=name, id=id)
         self._board = board
@@ -72,6 +80,10 @@ class BoardWidget(Widget):
         self._margin = margin
         self._cell_width = 3  # Will be calculated dynamically
         self._cell_height = 1  # Will be calculated dynamically
+
+        # Use provided renderer or default to standard
+        # This is the Strategy Pattern in action - composition over inheritance
+        self._renderer = renderer or create_board_renderer("standard")
 
     def set_board(self, board: Board) -> None:
         """Update the board to display.
@@ -126,6 +138,9 @@ class BoardWidget(Widget):
         # Calculate optimal cell size based on available space
         self._calculate_cell_size()
 
+        # Update renderer with calculated cell dimensions
+        self._update_renderer_dimensions()
+
         return self._create_board_table()
 
     def _calculate_cell_size(self) -> None:
@@ -133,295 +148,124 @@ class BoardWidget(Widget):
         if self._board is None:
             return
 
-        # Get available size from container
+        available_width, available_height = self._get_available_dimensions()
+        usable_width, usable_height = self._calculate_usable_space(available_width, available_height)
+        max_cell_width = self._calculate_max_cell_width(usable_width)
+        max_cell_height = self._calculate_max_cell_height(usable_height)
+        self._set_optimal_cell_dimensions(max_cell_width, max_cell_height)
+
+    def _get_available_dimensions(self) -> tuple[int, int]:
+        """Get available widget dimensions with error handling.
+
+        Returns:
+            Tuple of (width, height) in characters.
+        """
         try:
-            available_width = self.size.width if self.size and self.size.width > 0 else 80
-            available_height = self.size.height if self.size and self.size.height > 0 else 24
+            width = self.size.width if self.size and self.size.width > 0 else 80
+            height = self.size.height if self.size and self.size.height > 0 else 24
+            return width, height
         except AttributeError:
-            # Size attribute not yet available (widget not mounted)
             logger.debug("Widget size not yet available, using default dimensions")
-            available_width = 80
-            available_height = 24
+            return 80, 24
         except Exception as e:
-            # Unexpected error accessing size
             logger.warning(
                 "Unexpected error accessing widget size, using defaults: %s",
                 e,
                 exc_info=True,
             )
-            available_width = 80
-            available_height = 24
+            return 80, 24
 
-        # Account for margins (reduced margin for better space usage)
+    def _calculate_usable_space(self, available_width: int, available_height: int) -> tuple[int, int]:
+        """Calculate usable space after accounting for margins.
+
+        Args:
+            available_width: Available width in characters.
+            available_height: Available height in characters.
+
+        Returns:
+            Tuple of (usable_width, usable_height).
+        """
         usable_width = max(30, available_width - (2 * self._margin))
         usable_height = max(15, available_height - (2 * self._margin))
+        return usable_width, usable_height
 
-        # Calculate grid dimensions for 9x9 board
-        # We need space for: 9 cells + 8 separators (all 1 char wide)
-        # Thick separators use heavy line style, thin use light line style
+    def _calculate_max_cell_width(self, usable_width: int) -> int:
+        """Calculate maximum cell width based on usable space.
+
+        Args:
+            usable_width: Usable width in characters.
+
+        Returns:
+            Maximum cell width in characters.
+        """
         num_cells = self._board.size.cols
-
-        # For width: Calculate max cell width
-        # All separators are 1 character wide now
-        separator_width = num_cells - 1  # 8 separators for 9 cells
+        separator_width = num_cells - 1
         available_for_cells_width = usable_width - separator_width
-        max_cell_width = max(3, available_for_cells_width // num_cells)
+        return max(3, available_for_cells_width // num_cells)
 
-        # For height: Terminal chars are ~2:1 (height:width ratio)
-        # To make a visual square, we need fewer rows than columns
-        # We also need space for horizontal separators
+    def _calculate_max_cell_height(self, usable_height: int) -> int:
+        """Calculate maximum cell height based on usable space.
+
+        Args:
+            usable_height: Usable height in characters.
+
+        Returns:
+            Maximum cell height in characters.
+        """
+        num_cells = self._board.size.rows
         num_horiz_seps = num_cells - 1
         available_for_cells_height = usable_height - num_horiz_seps
-        max_cell_height = max(1, available_for_cells_height // num_cells)
+        return max(1, available_for_cells_height // num_cells)
 
-        # For square appearance: width should be ~2x height (accounting for char aspect)
-        # If we have width=6, we want height=3 to look square
+    def _set_optimal_cell_dimensions(self, max_cell_width: int, max_cell_height: int) -> None:
+        """Set optimal cell dimensions for square appearance.
+
+        Args:
+            max_cell_width: Maximum available cell width.
+            max_cell_height: Maximum available cell height.
+        """
         ideal_height_for_width = max(1, max_cell_width // 2)
 
-        # Choose the limiting dimension
         if ideal_height_for_width <= max_cell_height:
-            # Width is limiting
             self._cell_width = max_cell_width
             self._cell_height = ideal_height_for_width
         else:
-            # Height is limiting
             self._cell_height = max_cell_height
-            self._cell_width = max_cell_height * 2  # Double for square appearance
+            self._cell_width = max_cell_height * 2
 
-        # Ensure minimum and maximum sizes
+        self._apply_dimension_constraints()
+
+    def _apply_dimension_constraints(self) -> None:
+        """Apply minimum and maximum constraints to cell dimensions."""
         self._cell_width = max(3, min(self._cell_width, 20))
         self._cell_height = max(1, min(self._cell_height, 5))
 
+    def _update_renderer_dimensions(self) -> None:
+        """Update renderer with current cell dimensions if supported."""
+        # Only update if renderer supports it (StandardBoardRenderer does)
+        if hasattr(self._renderer, '_cell_width'):
+            self._renderer._cell_width = self._cell_width
+        if hasattr(self._renderer, '_cell_height'):
+            self._renderer._cell_height = self._cell_height
+
     def _create_board_table(self) -> Table:
-        """Create a Rich table representing the board.
+        """Create board table using the current renderer strategy.
+
+        This method delegates to the renderer, implementing the Strategy Pattern.
+        Different renderers provide different visual representations without
+        changing this widget's logic.
 
         Returns:
-            A formatted Rich Table with the board contents.
+            Formatted table with board content.
         """
-        if self._board is None:
+        if not self._board:
             return Table()
 
-        # Create table with box drawing characters
-        table = Table.grid(padding=0)
-
-        # Add columns: cell + separator for each column (use calculated cell width)
-        for col in range(self._board.size.cols):
-            table.add_column(justify="center", width=self._cell_width)
-            if col < self._board.size.cols - 1:
-                # All separators are 1 character wide (heavy vs light line style)
-                table.add_column(justify="center", width=1)
-
-        # Top border
-        border_row = self._create_border_row("top")
-        table.add_row(*border_row)
-
-        # Add rows with cells and separators
-        for row in range(self._board.size.rows):
-            # For taller cells, add multiple rows per cell
-            for cell_row in range(self._cell_height):
-                cells = []
-                for col in range(self._board.size.cols):
-                    position = Position(row, col)
-                    cell = self._board.get_cell(position)
-
-                    # Only show number in middle row of cell
-                    is_middle_row = cell_row == self._cell_height // 2
-                    cells.append(self._format_cell(cell, position, is_middle_row))
-
-                    # Add vertical separator after each column except the last
-                    if col < self._board.size.cols - 1:
-                        # Heavy line for 3x3 boxes, light line for cells
-                        if (col + 1) % 3 == 0:
-                            cells.append(Text("┃", style="bold bright_black"))  # Heavy line (thick)
-                        else:
-                            cells.append(Text("│", style="dim bright_black"))  # Light line (thin)
-
-                table.add_row(*cells)
-
-            # Add horizontal separator after each row except the last
-            if row < self._board.size.rows - 1:
-                separator_row = self._create_separator_row(row)
-                table.add_row(*separator_row)
-
-        # Bottom border
-        border_row = self._create_border_row("bottom")
-        table.add_row(*border_row)
-
-        return table
-
-    def _create_border_row(self, position: str) -> list[Text]:
-        """Create top or bottom border row.
-
-        Args:
-            position: Either "top" or "bottom".
-
-        Returns:
-            List of Text objects for the border row.
-        """
-        if self._board is None:
-            return []
-
-        cells = []
-        for col in range(self._board.size.cols):
-            # Dark borders for all cells - adjust to cell width
-            border_chars = "━" * self._cell_width
-            cells.append(Text(border_chars, style="bold bright_black"))
-
-            # Add corner/junction after each column except the last
-            if col < self._board.size.cols - 1:
-                if (col + 1) % 3 == 0:
-                    # 3x3 box boundary - heavy line
-                    if position == "top":
-                        cells.append(Text("┳", style="bold bright_black"))  # Heavy T-junction
-                    else:
-                        cells.append(Text("┻", style="bold bright_black"))  # Heavy T-junction
-                else:
-                    # Cell boundary - light line
-                    if position == "top":
-                        cells.append(Text("┯", style="dim bright_black"))  # Light T-junction
-                    else:
-                        cells.append(Text("┷", style="dim bright_black"))  # Light T-junction
-
-        return cells
-
-    def _create_separator_row(self, row: int) -> list[Text]:
-        """Create horizontal separator row between cells.
-
-        Args:
-            row: The row number (0-indexed) after which this separator appears.
-
-        Returns:
-            List of Text objects for the separator row.
-        """
-        if self._board is None:
-            return []
-
-        cells = []
-        # Check if this is a 3x3 box boundary
-        is_box_boundary = (row + 1) % 3 == 0
-
-        for col in range(self._board.size.cols):
-            # Horizontal line - darker colors, adjusted to cell width
-            if is_box_boundary:
-                sep_chars = "━" * self._cell_width
-                cells.append(Text(sep_chars, style="bold bright_black"))
-            else:
-                sep_chars = "─" * self._cell_width
-                cells.append(Text(sep_chars, style="dim bright_black"))
-
-            # Add junction after each column except the last
-            if col < self._board.size.cols - 1:
-                # Determine junction style based on boundaries
-                is_col_boundary = (col + 1) % 3 == 0
-
-                if is_box_boundary and is_col_boundary:
-                    # Box intersection - heavy cross
-                    cells.append(Text("╋", style="bold bright_black"))  # Heavy cross
-                elif is_box_boundary:
-                    # Box horizontal with cell vertical - heavy horizontal, light vertical
-                    cells.append(Text("┿", style="bold bright_black"))  # Mixed junction
-                elif is_col_boundary:
-                    # Cell horizontal with box vertical - light horizontal, heavy vertical
-                    cells.append(Text("╂", style="bold bright_black"))  # Mixed junction
-                else:
-                    # Cell intersection - light cross
-                    cells.append(Text("┼", style="dim bright_black"))  # Light cross
-
-        return cells
-
-    def _format_cell(self, cell: Cell, position: Position, show_value: bool = True) -> Text:
-        """Format a single cell with appropriate styling.
-
-        Args:
-            cell: The cell to format.
-            position: The position of the cell.
-            show_value: Whether to show the number (only in middle row of multi-row cells).
-
-        Returns:
-            Formatted Text object for the cell.
-        """
-        if show_value:
-            value = cell.get_numeric_value()
-            value_str = str(value) if value is not None else " "
-        else:
-            value_str = " "
-
-        # Center the value within the cell width
-        padded_value = value_str.center(self._cell_width)
-
-        style = self._get_cell_style(cell, position)
-        return Text(padded_value, style=style)
-
-    def _get_cell_style(self, cell: Cell, position: Position) -> Style:
-        """Determine the display style for a cell.
-
-        Args:
-            cell: The cell to style.
-            position: The position of the cell.
-
-        Returns:
-            Rich Style object for the cell.
-        """
-        # Check both cursor and error status
-        is_cursor = position == self._cursor_position
-        is_error = position in self._errors
-
-        # Cursor + Error: Show error background with cursor text color
-        if is_cursor and is_error:
-            # Red background to show error, bright text for cursor visibility
-            # Opacity effect simulated with color="bright_white"
-            return Style(
-                color="bright_white",
-                bgcolor="red",
-                bold=True,
-                underline=True,  # Extra indicator for cursor
-            )
-
-        # Cursor only: Highlighted with opacity-based transparency
-        if is_cursor:
-            # Adjust color brightness based on opacity
-            # Higher opacity = darker/more opaque, lower = lighter/more transparent
-            if self._cursor_opacity >= 90:
-                bgcolor = "cyan"
-            elif self._cursor_opacity >= 70:
-                bgcolor = "bright_cyan"
-            elif self._cursor_opacity >= 50:
-                bgcolor = "cyan"
-                return Style(color="black", bgcolor=bgcolor, bold=True, dim=True)
-            else:
-                # Very transparent - just underline
-                return Style(color="black", underline=True, bold=True)
-
-            return Style(
-                color="black",
-                bgcolor=bgcolor,
-                bold=True,
-            )
-
-        # Error only: Red text
-        if is_error:
-            return Style(
-                color="red",
-                bold=True,
-            )
-
-        # Fixed cell: Orange and bold
-        if cell.is_fixed:
-            return Style(
-                color="bright_yellow",  # Orange-ish
-                bold=True,
-            )
-
-        # User-entered value: Orange
-        if not cell.is_empty():
-            return Style(
-                color="yellow",  # Orange text
-            )
-
-        # Empty cell: Dimmed
-        return Style(
-            color="bright_black",
-            dim=True,
+        return self._renderer.render_board(
+            self._board,
+            self._cursor_position,
+            self._errors,
+            self._cursor_opacity
         )
 
     def set_cursor_opacity(self, opacity: int) -> None:
@@ -431,6 +275,18 @@ class BoardWidget(Widget):
             opacity: Opacity percentage (0-100).
         """
         self._cursor_opacity = max(0, min(100, opacity))
+        self.refresh()
+
+    def set_renderer(self, renderer: BoardRenderer) -> None:
+        """Change the rendering strategy at runtime.
+
+        This demonstrates the Strategy Pattern's flexibility - the rendering
+        behavior can be changed dynamically without modifying the widget.
+
+        Args:
+            renderer: New renderer strategy to use.
+        """
+        self._renderer = renderer
         self.refresh()
 
     def on_resize(self) -> None:
@@ -463,67 +319,3 @@ class BoardWidget(Widget):
             Set of positions with errors.
         """
         return self._errors.copy()
-
-
-class CompactBoardWidget(BoardWidget):
-    """Compact variant of the board widget with minimal spacing.
-
-    This variant is useful for smaller terminal windows or when
-    displaying multiple boards side-by-side.
-    """
-
-    DEFAULT_CSS = """
-    CompactBoardWidget {
-        border: solid $primary;
-        height: auto;
-        width: auto;
-        padding: 0;
-    }
-    """
-
-    def _create_board_table(self) -> Table:
-        """Create a compact Rich table representing the board.
-
-        Returns:
-            A formatted Rich Table with minimal padding.
-        """
-        if self._board is None:
-            return Table()
-
-        table = Table.grid(padding=(0, 0))
-
-        # Add columns for the 9x9 board
-        for col in range(self._board.size.cols):
-            table.add_column(justify="center", width=2)
-
-        # Add rows with cells
-        for row in range(self._board.size.rows):
-            cells = []
-            for col in range(self._board.size.cols):
-                position = Position(row, col)
-                cell = self._board.get_cell(position)
-                cells.append(self._format_compact_cell(cell, position))
-
-            table.add_row(*cells)
-
-        return table
-
-    def _format_compact_cell(self, cell: Cell, position: Position) -> Text:
-        """Format a single cell in compact mode.
-
-        Args:
-            cell: The cell to format.
-            position: The position of the cell.
-
-        Returns:
-            Formatted Text object for the cell.
-        """
-        value = cell.get_numeric_value()
-        value_str = str(value) if value is not None else "."
-
-        # Add visual separator for 3x3 boxes
-        if position.col % 3 == 0 and position.col > 0:
-            value_str = f"|{value_str}"
-
-        style = self._get_cell_style(cell, position)
-        return Text(value_str, style=style)
