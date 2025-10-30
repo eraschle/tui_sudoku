@@ -85,8 +85,8 @@ class StandardBoardRenderer:
             border_elements.append(Text(border_chars, style="bold bright_black"))
 
             if col < board.size.cols - 1:
-                if (col + 1) % 3 == 0:
-                    # 3x3 box boundary - heavy line
+                if (col + 1) % board.size.box_cols == 0:
+                    # Box boundary - heavy line
                     border_elements.append(Text("┳", style="bold bright_black"))
                 else:
                     # Cell boundary - light line
@@ -142,7 +142,7 @@ class StandardBoardRenderer:
     def _add_separator_row(self, table: Table, board: Board, row: int) -> None:
         """Add horizontal separator row."""
         separator_elements = []
-        is_box_boundary = (row + 1) % 3 == 0
+        is_box_boundary = (row + 1) % board.size.box_rows == 0
 
         for col in range(board.size.cols):
             if is_box_boundary:
@@ -159,14 +159,14 @@ class StandardBoardRenderer:
 
     def _get_vertical_separator(self, col: int, board: Board) -> Text:
         """Get vertical separator character."""
-        if (col + 1) % 3 == 0:
+        if (col + 1) % board.size.box_cols == 0:
             return Text("┃", style="bold bright_black")  # Heavy line (thick)
         return Text("│", style="dim bright_black")  # Light line (thin)
 
     def _get_intersection_char(self, row: int, col: int, board: Board) -> Text:
         """Get intersection character."""
-        is_box_row = (row + 1) % 3 == 0
-        is_box_col = (col + 1) % 3 == 0
+        is_box_row = (row + 1) % board.size.box_rows == 0
+        is_box_col = (col + 1) % board.size.box_cols == 0
 
         if is_box_row and is_box_col:
             return Text("╋", style="bold bright_black")  # Heavy cross
@@ -185,8 +185,8 @@ class StandardBoardRenderer:
             border_elements.append(Text(border_chars, style="bold bright_black"))
 
             if col < board.size.cols - 1:
-                if (col + 1) % 3 == 0:
-                    # 3x3 box boundary - heavy line
+                if (col + 1) % board.size.box_cols == 0:
+                    # Box boundary - heavy line
                     border_elements.append(Text("┻", style="bold bright_black"))
                 else:
                     # Cell boundary - light line
@@ -311,7 +311,7 @@ class CompactBoardRenderer:
                 position = Position(row, col)
                 cell = board.get_cell(position)
                 formatted_cell = self._format_cell(
-                    cell, position, cursor_position, error_positions, cursor_opacity
+                    cell, position, board, cursor_position, error_positions, cursor_opacity
                 )
                 cells.append(formatted_cell)
             table.add_row(*cells)
@@ -322,6 +322,7 @@ class CompactBoardRenderer:
         self,
         cell: Cell,
         position: Position,
+        board: Board,
         cursor_position: Position | None,
         error_positions: set[Position],
         cursor_opacity: int
@@ -330,8 +331,8 @@ class CompactBoardRenderer:
         value = cell.get_numeric_value()
         value_str = str(value) if value is not None else "."
 
-        # Add visual separator for 3x3 boxes
-        if position.col % 3 == 0 and position.col > 0:
+        # Add visual separator for box boundaries
+        if position.col % board.size.box_cols == 0 and position.col > 0:
             value_str = f"|{value_str}"
 
         # Determine style
