@@ -20,6 +20,11 @@ from sudoku.domain.entities.board import Board
 from sudoku.domain.value_objects.position import Position
 from sudoku.infrastructure.tui.components.board_widget import BoardWidget
 from sudoku.infrastructure.tui.components.status_widget import StatusWidget
+from sudoku.infrastructure.tui.helpers import (
+    CursorNavigator,
+    GameInputHandler,
+    GameStateManager,
+)
 from sudoku.infrastructure.tui.input.key_mappings import KeyMapper, NavigationKey
 from sudoku.infrastructure.validators.sudoku_validator import SudokuValidator
 
@@ -121,18 +126,19 @@ class GameScreen(Screen):
         self._board = board
         self._player_name = player_name
         self._difficulty = difficulty
-        self._on_move = on_move
         self._on_new_game = on_new_game
         self._on_quit = on_quit
         self._validator = validator
 
-        self._cursor_position = Position(0, 0)
+        # Create helper objects (Composition over inheritance)
+        self._input_handler = GameInputHandler(on_move=on_move)
+        self._state_manager = GameStateManager()
+        self._navigator = CursorNavigator(Position(0, 0))
+
+        # Keep only UI-specific attributes
         self._key_mapper = KeyMapper(enable_qwertz=True, enable_vim_navigation=True)
-        self._elapsed_time = timedelta()
-        self._game_state = "In Progress"
-        self._is_paused = False
-        self._validation_enabled = False
         self._cursor_opacity = 80  # Default 80%
+        self._validation_enabled = False
 
     def compose(self) -> ComposeResult:
         """Compose the game screen layout.
@@ -145,15 +151,15 @@ class GameScreen(Screen):
         yield StatusWidget(
             player_name=self._player_name,
             difficulty=self._difficulty,
-            elapsed_time=self._elapsed_time,
-            game_state=self._game_state,
+            elapsed_time=self._state_manager.elapsed_time,
+            game_state=self._state_manager.game_state,
             id="game-status",
         )
 
         with Container(id="game-container"), Vertical(id="board-container"):
             yield BoardWidget(
                 board=self._board,
-                cursor_position=self._cursor_position,
+                cursor_position=self._navigator.position,
                 cursor_opacity=self._cursor_opacity,
                 id="game-board",
             )
@@ -178,7 +184,7 @@ class GameScreen(Screen):
             event: The key event.
         """
         # When paused, block all input except 'p' which is handled by BINDINGS
-        if self._is_paused:
+        if self._state_manager.is_paused:
             return
 
         key = event.key
@@ -207,125 +213,75 @@ class GameScreen(Screen):
             return
 
     def _handle_number_input(self, number: int) -> None:
-        """Handle number input from keyboard.
+        """Handle number input by delegating to input handler.
 
         Args:
             number: The number that was input (1-9).
         """
-        if not self._board:
-            return
+        # Delegate input handling to helper
+        success, error_message = self._input_handler.handle_number_input(
+            self._board,
+            self._navigator.position,
+            number
+        )
 
-        # Check if current cell is fixed
-        try:
-            cell = self._board.get_cell(self._cursor_position)
-            if cell.is_fixed:
-                self._show_message("Cannot modify a fixed cell")
-                return
-        except IndexError:
+        if not success and error_message:
+            self._show_message(error_message)
             return
-
-        # Always allow the move (no blocking)
-        if self._on_move:
-            self._on_move(self._cursor_position, number)
-        else:
-            # Demo mode - update board directly
-            try:
-                self._board.set_cell_value(self._cursor_position, number, is_fixed=False)
-                self.refresh()
-            except IndexError as e:
-                logger.warning(
-                    "Invalid position %s for board update in demo mode: %s",
-                    self._cursor_position,
-                    e,
-                )
-            except Exception as e:
-                logger.error(
-                    "Failed to update board in demo mode at position %s with value %d: %s",
-                    self._cursor_position,
-                    number,
-                    e,
-                    exc_info=True,
-                )
 
         # Validate only if validation mode is enabled
         if self._validation_enabled:
             is_valid = self._validate_move(number)
             if not is_valid:
-                self.add_error(self._cursor_position)
+                self.add_error(self._navigator.position)
                 self._show_message(f"Invalid placement: {number}")
             else:
-                self.clear_error(self._cursor_position)
+                self.clear_error(self._navigator.position)
                 self._show_message(f"Valid: {number}")
         else:
             # Clear any previous error markers when validation is off
-            self.clear_error(self._cursor_position)
+            self.clear_error(self._navigator.position)
 
     def _handle_clear_cell(self) -> None:
-        """Handle clearing the current cell."""
-        if not self._board:
-            return
+        """Handle clear cell by delegating to input handler."""
+        success, error_message = self._input_handler.handle_clear_cell(
+            self._board,
+            self._navigator.position
+        )
 
-        # Check if current cell is fixed
-        try:
-            cell = self._board.get_cell(self._cursor_position)
-            if cell.is_fixed:
-                self._show_message("Cannot modify a fixed cell")
-                return
-        except IndexError:
-            return
-
-        # Call the move callback with None to clear
-        if self._on_move:
-            self._on_move(self._cursor_position, None)
+        if not success and error_message:
+            self._show_message(error_message)
 
     def _handle_navigation(self, direction: NavigationKey) -> None:
-        """Handle cursor navigation.
+        """Handle navigation by delegating to navigator.
 
         Args:
             direction: The navigation direction.
         """
-        if not self._board:
-            return
-
-        row = self._cursor_position.row
-        col = self._cursor_position.col
-
-        # Calculate new position based on direction
-        if direction == NavigationKey.UP:
-            row = max(0, row - 1)
-        elif direction == NavigationKey.DOWN:
-            row = min(self._board.size.rows - 1, row + 1)
-        elif direction == NavigationKey.LEFT:
-            col = max(0, col - 1)
-        elif direction == NavigationKey.RIGHT:
-            col = min(self._board.size.cols - 1, col + 1)
-
-        # Update cursor position
-        new_position = Position(row, col)
+        new_position = self._navigator.move(direction, self._board)
         self.set_cursor_position(new_position)
 
     def _update_timer_callback(self) -> None:
-        """Update the elapsed time display.
+        """Update timer by delegating to state manager.
 
         This is called periodically by the timer interval.
         """
-        if not self._is_paused and self._game_state == "In Progress":
-            self._elapsed_time += timedelta(seconds=1)
-            self._update_status_widget()
+        self._state_manager.increment_time(1)
+        self._update_status_widget()
 
     def _update_status_widget(self) -> None:
-        """Update the status widget with current game state."""
+        """Update status widget with state from state manager."""
         try:
             status_widget = self.query_one("#game-status", StatusWidget)
             status_widget.update_status(
-                elapsed_time=self._elapsed_time,
-                game_state=self._game_state,
+                elapsed_time=self._state_manager.elapsed_time,
+                game_state=self._state_manager.game_state,
             )
         except NoMatches:
             logger.warning(
                 "Status widget not found, cannot update status (elapsed_time=%s, state=%s)",
-                self._elapsed_time,
-                self._game_state,
+                self._state_manager.elapsed_time,
+                self._state_manager.game_state,
             )
         except Exception as e:
             logger.error(
@@ -389,7 +345,7 @@ class GameScreen(Screen):
         Args:
             position: The new cursor position.
         """
-        self._cursor_position = position
+        self._navigator.set_position(position)
         try:
             board_widget = self.query_one("#game-board", BoardWidget)
             board_widget.set_cursor_position(position)
@@ -467,21 +423,21 @@ class GameScreen(Screen):
             )
 
     def set_game_state(self, state: str) -> None:
-        """Set the game state.
+        """Set game state via state manager.
 
         Args:
             state: The new game state (e.g., "In Progress", "Won", "Paused").
         """
-        self._game_state = state
+        self._state_manager.set_state(state)
         self._update_status_widget()
 
     def set_elapsed_time(self, elapsed: timedelta) -> None:
-        """Set the elapsed time.
+        """Set elapsed time via state manager.
 
         Args:
             elapsed: The elapsed time.
         """
-        self._elapsed_time = elapsed
+        self._state_manager.set_elapsed_time(elapsed)
         self._update_status_widget()
 
     def action_new_game(self) -> None:
@@ -500,14 +456,15 @@ class GameScreen(Screen):
         self.app.pop_screen()
 
     def action_pause(self) -> None:
-        """Action to pause/resume the game."""
-        self._is_paused = not self._is_paused
-        if self._is_paused:
-            self.set_game_state("Paused")
+        """Toggle pause by delegating to state manager."""
+        self._state_manager.toggle_pause()
+
+        if self._state_manager.is_paused:
             self._show_message("Game Paused - Press 'p' to resume")
         else:
-            self.set_game_state("In Progress")
             self._show_message("Game Resumed")
+
+        self._update_status_widget()
 
     def action_toggle_validation(self) -> None:
         """Action to toggle validation mode on/off."""
@@ -605,13 +562,14 @@ class GameScreen(Screen):
 
         # Clear the current cell in the board copy for validation
         # The validator expects the cell to be empty when checking if a move is valid
-        board_2d[self._cursor_position.row][self._cursor_position.col] = 0
+        position = self._navigator.position
+        board_2d[position.row][position.col] = 0
 
         # Delegate validation to the injected validator
         return self._validator.is_valid_move(
             board_2d,
-            self._cursor_position.row,
-            self._cursor_position.col,
+            position.row,
+            position.col,
             value,
             self._board.size.box_cols,
             self._board.size.box_rows,
@@ -635,28 +593,28 @@ class GameScreen(Screen):
                     continue
 
                 # Temporarily set cursor to this position for validation
-                old_cursor = self._cursor_position
-                self._cursor_position = position
+                old_cursor = self._navigator.position
+                self._navigator.set_position(position)
                 is_valid = self._validate_move(value)
-                self._cursor_position = old_cursor
+                self._navigator.set_position(old_cursor)
 
                 if not is_valid:
                     self.add_error(position)
 
     @property
     def cursor_position(self) -> Position:
-        """Get the current cursor position.
+        """Get current cursor position from navigator.
 
         Returns:
             The current cursor position.
         """
-        return self._cursor_position
+        return self._navigator.position
 
     @property
     def is_paused(self) -> bool:
-        """Check if the game is paused.
+        """Check if game is paused from state manager.
 
         Returns:
             True if the game is paused, False otherwise.
         """
-        return self._is_paused
+        return self._state_manager.is_paused
