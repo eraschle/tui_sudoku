@@ -33,12 +33,12 @@ class StandardBoardRenderer:
     - Color-coded cells (fixed, user, cursor, errors)
     """
 
-    def __init__(self, cell_width: int = 3, cell_height: int = 1) -> None:
+    def __init__(self, cell_width: int = 5, cell_height: int = 2) -> None:
         """Initialize the standard renderer.
 
         Args:
-            cell_width: Width of each cell in characters.
-            cell_height: Height of each cell in rows.
+            cell_width: Width of each cell in characters (default: 5 for larger display).
+            cell_height: Height of each cell in rows (default: 2 for larger display).
         """
         self._cell_width = cell_width
         self._cell_height = cell_height
@@ -226,7 +226,13 @@ class StandardBoardRenderer:
         error_positions: set[Position],
         cursor_opacity: int
     ) -> Style:
-        """Determine the display style for a cell."""
+        """Determine the display style for a cell.
+
+        Note: True alpha transparency is not reliably supported across all terminals.
+        We simulate transparency by using different background colors and the 'dim'
+        attribute. For terminals like Ghostty, this provides a visual approximation
+        of transparency without relying on ANSI alpha channel extensions.
+        """
         is_cursor = cursor_position and position == cursor_position
         is_error = position in error_positions
 
@@ -239,20 +245,26 @@ class StandardBoardRenderer:
                 underline=True,  # Extra indicator for cursor
             )
 
-        # Cursor only: Highlighted with opacity-based transparency
+        # Cursor only: Highlighted with opacity-based visual effect
         if is_cursor:
-            # Adjust color brightness based on opacity
-            if cursor_opacity >= 90:
-                bgcolor = "cyan"
-            elif cursor_opacity >= 70:
-                bgcolor = "bright_cyan"
-            elif cursor_opacity >= 50:
-                return Style(color="black", bgcolor="cyan", bold=True, dim=True)
+            # Map opacity to visual representation
+            # Higher opacity = more opaque background
+            # Lower opacity = more subtle highlighting
+            if cursor_opacity >= 80:
+                # High opacity: solid background
+                return Style(color="black", bgcolor="bright_cyan", bold=True)
+            elif cursor_opacity >= 60:
+                # Medium-high opacity: bright color with reverse
+                return Style(color="black", bgcolor="cyan", bold=True)
+            elif cursor_opacity >= 40:
+                # Medium-low opacity: dimmed background
+                return Style(color="bright_white", bgcolor="blue", bold=True, dim=True)
+            elif cursor_opacity >= 20:
+                # Low opacity: just reverse without background
+                return Style(color="black", bgcolor="bright_black", bold=True, reverse=True)
             else:
-                # Very transparent - just underline
-                return Style(color="black", underline=True, bold=True)
-
-            return Style(color="black", bgcolor=bgcolor, bold=True)
+                # Very low opacity: just underline
+                return Style(color="bright_cyan", underline=True, bold=True)
 
         # Error only: Red text
         if is_error:

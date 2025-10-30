@@ -46,8 +46,9 @@ class BoardWidget(Widget):
         border: none;
         height: 100%;
         width: 100%;
-        padding: 0;
+        padding: 2;
         align: center middle;
+        content-align: center middle;
     }
     """
 
@@ -78,8 +79,8 @@ class BoardWidget(Widget):
         self._errors: set[Position] = set()
         self._cursor_opacity = cursor_opacity
         self._margin = margin
-        self._cell_width = 3  # Will be calculated dynamically
-        self._cell_height = 1  # Will be calculated dynamically
+        self._cell_width = 5  # Will be calculated dynamically (larger default)
+        self._cell_height = 2  # Will be calculated dynamically (larger default)
 
         # Use provided renderer or default to standard
         # This is the Strategy Pattern in action - composition over inheritance
@@ -220,25 +221,43 @@ class BoardWidget(Widget):
     def _set_optimal_cell_dimensions(self, max_cell_width: int, max_cell_height: int) -> None:
         """Set optimal cell dimensions for square appearance.
 
+        Terminal characters are typically ~2x taller than wide, so we aim for
+        width ≈ 2 * height to create visually square cells.
+
         Args:
             max_cell_width: Maximum available cell width.
             max_cell_height: Maximum available cell height.
         """
+        # Terminal characters are typically 2:1 (height:width ratio)
+        # For square cells: cell_width should be approximately 2 * cell_height
         ideal_height_for_width = max(1, max_cell_width // 2)
+        ideal_width_for_height = max_cell_height * 2
 
+        # Choose the combination that fits better
         if ideal_height_for_width <= max_cell_height:
+            # Width-constrained: use maximum available width
             self._cell_width = max_cell_width
             self._cell_height = ideal_height_for_width
-        else:
+        elif ideal_width_for_height <= max_cell_width:
+            # Height-constrained: use maximum available height
             self._cell_height = max_cell_height
-            self._cell_width = max_cell_height * 2
+            self._cell_width = ideal_width_for_height
+        else:
+            # Neither fits perfectly, use the smaller of both options
+            if max_cell_width * max_cell_height >= ideal_width_for_height * ideal_height_for_width:
+                self._cell_height = max_cell_height
+                self._cell_width = ideal_width_for_height
+            else:
+                self._cell_width = max_cell_width
+                self._cell_height = ideal_height_for_width
 
         self._apply_dimension_constraints()
 
     def _apply_dimension_constraints(self) -> None:
         """Apply minimum and maximum constraints to cell dimensions."""
-        self._cell_width = max(3, min(self._cell_width, 20))
-        self._cell_height = max(1, min(self._cell_height, 5))
+        # Increased minimum dimensions for larger, more readable numbers
+        self._cell_width = max(5, min(self._cell_width, 20))
+        self._cell_height = max(2, min(self._cell_height, 8))
 
     def _update_renderer_dimensions(self) -> None:
         """Update renderer with current cell dimensions if supported."""

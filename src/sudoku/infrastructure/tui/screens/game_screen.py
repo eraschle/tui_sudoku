@@ -240,14 +240,15 @@ class GameScreen(Screen):
             self._show_message(error_message)
             return
 
-        # Validate only if validation mode is enabled
+        # Re-validate entire board after content change if validation is enabled
         if self._validation_enabled:
-            is_valid = self._validate_move(number)
-            if not is_valid:
-                self.add_error(self._navigator.position)
+            # Re-validate all cells to reflect the impact of this change
+            self._validate_all_cells()
+
+            # Check if the current position has an error after validation
+            if self._navigator.position in self._get_current_errors():
                 self._show_message(f"Invalid placement: {number}")
             else:
-                self.clear_error(self._navigator.position)
                 self._show_message(f"Valid: {number}")
         else:
             # Clear any previous error markers when validation is off
@@ -262,6 +263,13 @@ class GameScreen(Screen):
 
         if not success and error_message:
             self._show_message(error_message)
+            return
+
+        # Re-validate entire board after clearing a cell if validation is enabled
+        if self._validation_enabled:
+            # Re-validate all cells to reflect the impact of this change
+            self._validate_all_cells()
+            self._show_message("Cell cleared")
 
     def _handle_navigation(self, direction: NavigationKey) -> None:
         """Handle navigation by delegating to navigator.
@@ -608,6 +616,26 @@ class GameScreen(Screen):
 
                 if not is_valid:
                     self.add_error(position)
+
+    def _get_current_errors(self) -> set[Position]:
+        """Get the current set of error positions from the board widget.
+
+        Returns:
+            Set of positions with errors, or empty set if widget not found.
+        """
+        try:
+            board_widget = self.query_one("#game-board", BoardWidget)
+            return board_widget.errors
+        except NoMatches:
+            logger.warning("Board widget not found, cannot get error positions")
+            return set()
+        except Exception as e:
+            logger.error(
+                "Failed to get error positions: %s",
+                e,
+                exc_info=True,
+            )
+            return set()
 
     @property
     def cursor_position(self) -> Position:
